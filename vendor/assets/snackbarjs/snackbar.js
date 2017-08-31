@@ -1,6 +1,17 @@
 /* SnackbarJS - MIT LICENSE (https://github.com/FezVrasta/snackbarjs/blob/master/LICENSE.md) */
 
-(function( $ ){
+(function (factory) {
+    if (typeof define === 'function' && define.amd) {
+        // AMD. Register as an anonymous module.
+        define(['jquery'], factory);
+    } else if (typeof exports === 'object') {
+        // Node/CommonJS
+        module.exports = factory(require('jquery'));
+    } else {
+        // Browser globals
+        factory(jQuery);
+    }
+}(function( $ ){
 
     $(document).ready(function() {
         $("body").append("<div id=snackbar-container/>");
@@ -13,6 +24,27 @@
             return false;
         }
     }
+
+    //events (publish subscribe) pattern [aka Event Emitter]
+    var events = {
+      events: {},
+      on: function (eventName, fn) {
+        this.events[eventName] = this.events[eventName] || [];
+        this.events[eventName].push(fn);
+      },
+      off: function(eventName) {
+        if (this.events[eventName]) {
+          delete this.events[eventName];
+        }
+      },
+      emit: function (eventName, data) {
+        if (this.events[eventName]) {
+          this.events[eventName].forEach(function(fn) {
+            fn(data);
+          });
+        }
+      }
+    };
 
     $(document)
     .on("click", "[data-toggle=snackbar]", function() {
@@ -27,31 +59,63 @@
         if (isset(options) && options === Object(options)) {
             var $snackbar;
 
+            var snackbarNew = false;
+
+            options = Object.assign({}, $.snackbar.defaults, options)
+
             if (!isset(options.id)) {
-                $snackbar = $("<div/>").attr("id", "snackbar" + Date.now()).attr("class", "snackbar");
+                options.id = "snackbar" + Date.now();
+                $snackbar = $("<div/>").attr("id", options.id).attr("class", "snackbar");
+                snackbarNew = true;
             } else {
-                $snackbar = $("#" + options.id);
+                if ($("#" + options.id).length) {
+                    $snackbar = $("#" + options.id);
+                } else {
+                    $snackbar = $("<div/>").attr("id", "" + options.id).attr("class", "snackbar");
+                    snackbarNew = true;
+                }
             }
 
             var snackbarStatus = $snackbar.hasClass("snackbar-opened");
 
             if (isset(options.style)) {
-                $snackbar.attr("class", "snackbar " + options.style);
-            } else {
-                $snackbar.attr("class", "snackbar");
-            }
-
-            options.timeout = (isset(options.timeout)) ? options.timeout : 3000;
-
-            if (isset(options.content)) {
-                if ($snackbar.find(".snackbar-content").length) {
-                    $snackbar.find(".snackbar-content").text(options.content);
+                if (snackbarStatus) {
+                    $snackbar.attr("class", "snackbar snackbar-opened " + options.style);
                 } else {
-                    $snackbar.prepend("<span class=snackbar-content>" + options.content + "</span>");
+                    $snackbar.attr("class", "snackbar " + options.style);
+                }
+                $snackbar.attr("data-style", options.style);
+            } else {
+                if (snackbarStatus) {
+                    $snackbar.attr("class", "snackbar snackbar-opened");
+                } else {
+                    $snackbar.attr("class", "snackbar");
                 }
             }
 
-            if (!isset(options.id)) {
+            options.htmlAllowed = isset(options.htmlAllowed) ? options.htmlAllowed : false;
+
+            options.timeout = (isset(options.timeout)) ? options.timeout : 3000;
+            $snackbar.attr("data-timeout", options.timeout);
+
+            options.content = (options.htmlAllowed) ? options.content : $("<p>" + options.content + "</p>").text();
+
+            if (isset(options.onClose)) events.on(options.id, options.onClose);
+
+            if (isset(options.htmlAllowed)) {
+                $snackbar.attr("data-html-allowed", options.htmlAllowed);
+            }
+
+            if (isset(options.content)) {
+                if ($snackbar.find(".snackbar-content").length) {
+                    $snackbar.find(".snackbar-content").html(options.content);
+                } else {
+                    $snackbar.prepend("<span class=snackbar-content>" + options.content + "</span>");
+                }
+                $snackbar.attr("data-content", options.content);
+            }
+
+            if (snackbarNew) {
                 $snackbar.appendTo("#snackbar-container");
             } else {
                 $snackbar.insertAfter("#snackbar-container .snackbar:last-child");
@@ -74,6 +138,8 @@
                         $snackbar.addClass("snackbar-opened");
                     } else if (isset(options.action) && options.action == "hide") {
                         $snackbar.removeClass("snackbar-opened");
+                        events.emit(options.id);
+                        events.off(options.id);
                     }
                 }
             }, 50);
@@ -86,6 +152,8 @@
                 setTimeout(function() {
                     if ($snackbar.data("animationId2") === animationId2) {
                         $snackbar.removeClass("snackbar-opened");
+                        events.emit(options.id);
+                        events.off(options.id);
                     }
                 }, options.timeout);
             }
@@ -97,8 +165,13 @@
         }
     };
 
-    $.fn.snackbar = function(action) {
+    // Global defaults that the user can set
+    $.snackbar.defaults = {};
 
+    $.fn.snackbar = function(action) {
+        if (typeof action==='undefined'){
+            return;
+        }
         var options = {};
 
         if (!this.hasClass("snackbar")) {
@@ -107,7 +180,8 @@
                 options = {
                     content: $(this).attr("data-content"),
                     style: $(this).attr("data-style"),
-                    timeout: $(this).attr("data-timeout")
+                    timeout: $(this).attr("data-timeout"),
+                    htmlAllowed: $(this).attr("data-html-allowed")
                 };
             }
 
@@ -126,7 +200,13 @@
 
         } else {
 
-            options.id = this.attr("id");
+            options = {
+                    id: this.attr("id"),
+                    content: $(this).attr("data-content"),
+                    style: $(this).attr("data-style"),
+                    timeout: parseInt($(this).attr("data-timeout")),
+                    htmlAllowed: $(this).attr("data-html-allowed")
+                };
             if(action === "show" || action === "hide" || action == "toggle") {
                 options.action = action;
             }
@@ -134,4 +214,4 @@
         }
 
     };
-})( jQuery );
+}));
